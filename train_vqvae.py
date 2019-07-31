@@ -63,16 +63,18 @@ def train(epoch, loader, model, target_model, target_label, optimizer, scheduler
 
         # out:vqvae输出的图片信息
         # latent_loss
-        out, latent_loss = model(img)
+
         # adv_loss 目标类别和vqvae out的损失
+        out, latent_loss = model(img)
         with torch.no_grad():
             target_out = target_model(out)
-        adv_loss = criterion_t(target_out, target_label)
+        adv_loss = criterion_t(target_out, target_label.long())
         # 重建损失MSELoss()
         recon_loss = criterion(out, img)
         latent_loss = latent_loss.mean()
         loss = recon_loss + latent_loss_weight * \
             latent_loss + adv_loss_weight * adv_loss
+        print(loss)
         loss.backward()
 
         if scheduler is not None:
@@ -141,9 +143,9 @@ if __name__ == '__main__':
     # dataset = datasets.ImageFolder(args.path, transform=transform)
     train_dataset = datasets.CIFAR100(
         root=args.path, train=True, download=True, transform=transform)
-    validation_data = datasets.CIFAR100(root=args.path, train=False, download=True,
-                                        transform=transform)
-    loader = DataLoader(train_dataset, batch_size=96,
+    # validation_data = datasets.CIFAR100(root=args.path, train=False, download=True,
+    #                                     transform=transform)
+    loader = DataLoader(train_dataset, batch_size=128,
                         shuffle=True, num_workers=4, pin_memory=True)
     if args.checkPoint != '':
         model = VQVAE()
@@ -152,10 +154,16 @@ if __name__ == '__main__':
     else:
         model = VQVAE().to(device)
 
+    target_label = torch.Tensor([40,  1, 91, 79, 31,  9, 29, 62, 60, 68,  6, 40, 81, 55, 98, 94, 24, 59,
+                                 9,  2,  7, 47, 45,  8, 18,  6, 47, 46, 77, 56, 93, 22, 70, 94, 74, 72,
+                                 16, 31, 39, 41, 37, 30, 91, 57, 79, 66, 73, 68, 39, 93, 95, 70, 28, 28,
+                                 19, 17, 45, 28, 21, 13, 67, 91,  0, 67, 17, 51, 94, 87,  9, 72, 69, 74,
+                                 22, 17, 26, 79, 89, 31, 19, 49, 19, 60, 27, 96, 60, 29, 70, 73, 24, 30,
+                                 63, 72, 24, 75, 18, 25, 15, 45, 24, 60, 45, 69, 58, 19, 34, 58, 23, 30,
+                                 63, 95,  1, 16, 73, 35, 19, 85, 95, 74, 67, 99, 52, 72, 82, 11, 88, 63,
+                                 77, 60])
     target_model = models.resnet50(pretrained=True)
     target_model = target_model.to(device)
-    classes = unpickle('/Users/ty/vqvae_adv/cifar-100-batches-py/cifar-100-python/meta')
-    target_label = classes['fine_label_names'][0]
 
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     scheduler = None
@@ -166,6 +174,9 @@ if __name__ == '__main__':
     if args.out == True:
         train(1, loader, model, target_model, target_label,
               optimizer, scheduler, device, args)
+
+    torch.cuda.empty_cache()
+
     for i in range(args.epoch):
         train(i, loader, model, target_model, target_label,
               optimizer, scheduler, device, args)
