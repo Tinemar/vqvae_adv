@@ -1,3 +1,5 @@
+# -*- coding: UTF-8 -*-
+
 import argparse
 
 import torch
@@ -6,14 +8,21 @@ from torch.utils.data import DataLoader
 import torchvision.models as models
 from torch.autograd import Variable
 from torchvision import datasets, transforms, utils
-
+from unpickle import unpickle
 from tqdm import tqdm
 
 from vqvae import VQVAE
 from scheduler import CycleScheduler
 
 
-def train(epoch, loader, model, target_model, target_class, optimizer, scheduler, device, args):
+def unpickle(file):
+    import pickle
+    with open(file, 'rb') as f:
+        dict = pickle.load(f, encoding="bytes")
+    return dict
+
+
+def train(epoch, loader, model, target_model, target_label, optimizer, scheduler, device, args):
     loader = tqdm(loader)
 
     criterion = nn.MSELoss()
@@ -29,6 +38,7 @@ def train(epoch, loader, model, target_model, target_class, optimizer, scheduler
         model.zero_grad()
         img = img.to(device)
         label = label.to(device)
+        target_label = target_label.to(device)
         criterion_t = nn.CrossEntropyLoss()
 
         if args.out == True:
@@ -57,7 +67,7 @@ def train(epoch, loader, model, target_model, target_class, optimizer, scheduler
         # adv_loss 目标类别和vqvae out的损失
         with torch.no_grad():
             target_out = target_model(out)
-        adv_loss = criterion_t(target_out, target_class)
+        adv_loss = criterion_t(target_out, target_label)
         # 重建损失MSELoss()
         recon_loss = criterion(out, img)
         latent_loss = latent_loss.mean()
@@ -130,8 +140,8 @@ if __name__ == '__main__':
 
     # dataset = datasets.ImageFolder(args.path, transform=transform)
     train_dataset = datasets.CIFAR100(
-        root='F:/vq-vae-2-pytorch/cifar-100-batches-py', train=True, download=True, transform=transform)
-    validation_data = datasets.CIFAR100(root="F:/vq-vae-2-pytorch/cifar-100-batches-py", train=False, download=True,
+        root=args.path, train=True, download=True, transform=transform)
+    validation_data = datasets.CIFAR100(root=args.path, train=False, download=True,
                                         transform=transform)
     loader = DataLoader(train_dataset, batch_size=96,
                         shuffle=True, num_workers=4, pin_memory=True)
@@ -144,7 +154,8 @@ if __name__ == '__main__':
 
     target_model = models.resnet50(pretrained=True)
     target_model = target_model.to(device)
-    target_class = args.target
+    classes = unpickle('/Users/ty/vqvae_adv/cifar-100-batches-py/cifar-100-python/meta')
+    target_label = classes['fine_label_names'][0]
 
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     scheduler = None
@@ -153,10 +164,10 @@ if __name__ == '__main__':
             optimizer, args.lr, n_iter=len(loader) * args.epoch, momentum=None
         )
     if args.out == True:
-        train(1, loader, model, target_model, target_class,
+        train(1, loader, model, target_model, target_label,
               optimizer, scheduler, device, args)
     for i in range(args.epoch):
-        train(i, loader, model, target_model, target_class,
+        train(i, loader, model, target_model, target_label,
               optimizer, scheduler, device, args)
         torch.save(
             model.module.state_dict(
