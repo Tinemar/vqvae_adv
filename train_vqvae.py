@@ -11,6 +11,7 @@ from torchvision import datasets, transforms, utils
 from unpickle import unpickle
 from tqdm import tqdm
 
+from lookahead import Lookahead
 from vqvae import VQVAE
 from scheduler import CycleScheduler
 
@@ -22,7 +23,7 @@ def unpickle(file):
     return dict
 
 
-def train(epoch, loader, model, target_model, target_label, optimizer, scheduler, device, args):
+def train(epoch, loader,validation_loader, model, target_model, target_label, optimizer, scheduler, device, args):
     loader = tqdm(loader)
 
     criterion = nn.MSELoss()
@@ -33,33 +34,40 @@ def train(epoch, loader, model, target_model, target_label, optimizer, scheduler
 
     mse_sum = 0
     mse_n = 0
+    if args.out == True:
+        for i, (img, label) in enumerate(validation_loader):
+            model.zero_grad()
+            optimizer.zero_grad()
+            img = img.to(device)
+            label = label.to(device)
+            print(label)
+            target_label = target_label.to(device)
+            criterion_t = nn.CrossEntropyLoss().to(device)
+            target_model.eval()
+            suc = 0
+            for i in range(128):
+                i = img[i:i+1]
+                label = label[0]
+                sample = i
+                with torch.no_grad():
+                    out, _ = model(sample)
 
+                outputs_t = target_model(Variable(out))
+                outputs_s = target_model(Variable(sample))
+                _, predicted1 = torch.max(outputs_t.data, 1)
+                _, predicted2 = torch.max(outputs_s.data, 1)
+                if predicted1!=predicted2:
+                    suc +=1
+                # print('out:', predicted1, 'target_out:', predicted2)
+            print(suc/128)
+        exit()
     for i, (img, label) in enumerate(loader):
         model.zero_grad()
+        optimizer.zero_grad()
         img = img.to(device)
         label = label.to(device)
         target_label = target_label.to(device)
-        criterion_t = nn.CrossEntropyLoss()
-
-        if args.out == True:
-            model.eval()
-            sample = img[:1].to(device)
-            with torch.no_grad():
-                out, _ = model(sample)
-            utils.save_image(
-                torch.cat([sample, out], 0),
-                f'sample_adv/out.png',
-                nrow=1,
-                normalize=True,
-                range=(-1, 1),
-            )
-            classes = ('plane', 'car', 'bird', 'cat',
-                       'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
-            outputs = target_model(Variable(out))
-            _, predicted = torch.max(outputs.data, 1)
-            for i in predicted:
-                print(i)
-            exit()
+        criterion_t = nn.CrossEntropyLoss().to(device)
 
         # out:vqvae输出的图片信息
         # latent_loss
@@ -68,12 +76,18 @@ def train(epoch, loader, model, target_model, target_label, optimizer, scheduler
         out, latent_loss = model(img)
         with torch.no_grad():
             target_out = target_model(out)
-        adv_loss = criterion_t(target_out, target_label.long())
+        try:
+            adv_loss = criterion_t(target_out, target_label.long())
+        except:
+            target_label = torch.ones(80)
+            target_label = target_label.to(device)
+            adv_loss = criterion_t(target_out, target_label.long())
         # 重建损失MSELoss()
         recon_loss = criterion(out, img)
         latent_loss = latent_loss.mean()
-        loss = recon_loss + latent_loss_weight * \
-            latent_loss + adv_loss_weight * adv_loss
+        print(adv_loss)
+        loss = recon_loss + latent_loss_weight * latent_loss
+        + adv_loss_weight * adv_loss
         print(loss)
         loss.backward()
 
@@ -122,8 +136,8 @@ if __name__ == '__main__':
 
     parser.add_argument('path', type=str)
     parser.add_argument('--out', type=bool, default=False)
-    parser.add_argument('--checkPoint', type=str, default='')
-    parser.add_argument('--target', type=str, default='')
+    parser.add_argument('--ckp', type=str, default='')
+    parser.add_argument('--tmodel', type=str, default='')
 
     args = parser.parse_args()
 
@@ -141,46 +155,45 @@ if __name__ == '__main__':
     )
 
     # dataset = datasets.ImageFolder(args.path, transform=transform)
-    train_dataset = datasets.CIFAR100(
+    train_dataset = datasets.CIFAR10(
         root=args.path, train=True, download=True, transform=transform)
-    # validation_data = datasets.CIFAR100(root=args.path, train=False, download=True,
-    #                                     transform=transform)
+    validation_data = datasets.CIFAR10(root=args.path, train=False, download=True,
+                                        transform=transform)
     loader = DataLoader(train_dataset, batch_size=128,
                         shuffle=True, num_workers=4, pin_memory=True)
-    if args.checkPoint != '':
+    validation_loader = DataLoader(validation_data, batch_size=128,
+                        shuffle=True, num_workers=4, pin_memory=True)
+    if args.ckp != '':
         model = VQVAE()
-        model.load_state_dict(torch.load(args.checkPoint))
+        model.load_state_dict(torch.load(args.ckp))
         model = model.to(device)
     else:
         model = VQVAE().to(device)
 
-    target_label = torch.Tensor([40,  1, 91, 79, 31,  9, 29, 62, 60, 68,  6, 40, 81, 55, 98, 94, 24, 59,
-                                 9,  2,  7, 47, 45,  8, 18,  6, 47, 46, 77, 56, 93, 22, 70, 94, 74, 72,
-                                 16, 31, 39, 41, 37, 30, 91, 57, 79, 66, 73, 68, 39, 93, 95, 70, 28, 28,
-                                 19, 17, 45, 28, 21, 13, 67, 91,  0, 67, 17, 51, 94, 87,  9, 72, 69, 74,
-                                 22, 17, 26, 79, 89, 31, 19, 49, 19, 60, 27, 96, 60, 29, 70, 73, 24, 30,
-                                 63, 72, 24, 75, 18, 25, 15, 45, 24, 60, 45, 69, 58, 19, 34, 58, 23, 30,
-                                 63, 95,  1, 16, 73, 35, 19, 85, 95, 74, 67, 99, 52, 72, 82, 11, 88, 63,
-                                 77, 60])
-    target_model = models.resnet50(pretrained=True)
-    target_model = target_model.to(device)
+    target_label = torch.ones(128)
+    print(target_label.size())
+    if args.tmodel != '':
+        target_model = torch.load(args.tmodel).to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    # optimizer = Lookahead(optimizer, k=5, alpha=0.5)
+    # optimizer.zero_grad()
+
     scheduler = None
     if args.sched == 'cycle':
         scheduler = CycleScheduler(
             optimizer, args.lr, n_iter=len(loader) * args.epoch, momentum=None
         )
     if args.out == True:
-        train(1, loader, model, target_model, target_label,
+        train(1, loader,validation_loader, model, target_model, target_label,
               optimizer, scheduler, device, args)
 
     torch.cuda.empty_cache()
 
     for i in range(args.epoch):
-        train(i, loader, model, target_model, target_label,
+        train(i, loader, validation_loader,model, target_model, target_label,
               optimizer, scheduler, device, args)
         torch.save(
-            model.module.state_dict(
+            model.state_dict(
             ), f'checkpoint_adv/vqvae_{str(i + 1).zfill(3)}.pt'
         )

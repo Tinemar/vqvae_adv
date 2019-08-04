@@ -105,8 +105,10 @@ venv.bak/
 sample3
 sample2
 sample_adv
+sample
 extract
 checkpoint_adv
+checkpoint
 .vscode
 cifar-100-batches-py
 cifar-10-batches-py
