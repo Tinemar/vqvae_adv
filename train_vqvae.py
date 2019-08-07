@@ -34,33 +34,34 @@ def train(epoch, loader,validation_loader, model, target_model, target_label, op
 
     mse_sum = 0
     mse_n = 0
+
     if args.out == True:
         for i, (img, label) in enumerate(validation_loader):
             model.zero_grad()
             optimizer.zero_grad()
             img = img.to(device)
             label = label.to(device)
-            print(label)
             target_label = target_label.to(device)
             criterion_t = nn.CrossEntropyLoss().to(device)
             target_model.eval()
             suc = 0
             for i in range(128):
                 i = img[i:i+1]
-                label = label[0]
+                # label = label[0]
                 sample = i
                 with torch.no_grad():
                     out, _ = model(sample)
 
-                outputs_t = target_model(Variable(out))
-                outputs_s = target_model(Variable(sample))
-                _, predicted1 = torch.max(outputs_t.data, 1)
-                _, predicted2 = torch.max(outputs_s.data, 1)
+                outputs_t = target_model(Variable(sample))
+                outputs_s = target_model(Variable(out))
+                _, predicted1 = torch.max(outputs_s.data, 1)
+                _, predicted2 = torch.max(outputs_t.data, 1)
                 if predicted1!=predicted2:
                     suc +=1
-                # print('out:', predicted1, 'target_out:', predicted2)
+                # print('sample:', predicted1, 'target_out:', predicted2)
             print(suc/128)
         exit()
+
     for i, (img, label) in enumerate(loader):
         model.zero_grad()
         optimizer.zero_grad()
