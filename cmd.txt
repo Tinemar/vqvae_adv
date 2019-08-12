@@ -1,1 +1,1 @@
- F:\vqvae_adv>python train_vqvae.py cifar-10-batches-py --size 32 --tmodel F:\models\cifarcifar10.pth --epoch 200 --lr 3e-4 --sched=cycle --ckp checkpoint_adv/vqvae_003.pt 
+python train_vqvae.py cifar-10-batches-py --size 32 --tmodel F:\models\cifarcifar10.pth --epoch 200 --lr 3e-4 --sched=cycle --ckp checkpoint_adv/vqvae_003.pt 

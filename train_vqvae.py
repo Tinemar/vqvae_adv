@@ -3,6 +3,8 @@
 import argparse
 
 import torch
+import torch.nn.functional as F
+
 from torch import nn, optim
 from torch.utils.data import DataLoader
 import torchvision.models as models
@@ -23,12 +25,12 @@ def unpickle(file):
     return dict
 
 
-def train(epoch, loader,validation_loader, model, target_model, target_label, optimizer, scheduler, device, args):
+def train(epoch, loader, validation_loader, model, target_model, target_label, optimizer, scheduler, device, args):
     loader = tqdm(loader)
 
     criterion = nn.MSELoss()
 
-    adv_loss_weight = 0.25
+    adv_loss_weight = 1
     latent_loss_weight = 0.25
     sample_size = 25
 
@@ -56,8 +58,8 @@ def train(epoch, loader,validation_loader, model, target_model, target_label, op
                 outputs_s = target_model(Variable(out))
                 _, predicted1 = torch.max(outputs_s.data, 1)
                 _, predicted2 = torch.max(outputs_t.data, 1)
-                if predicted1!=predicted2:
-                    suc +=1
+                if predicted1 != predicted2:
+                    suc += 1
                 # print('sample:', predicted1, 'target_out:', predicted2)
             print(suc/128)
         exit()
@@ -77,6 +79,7 @@ def train(epoch, loader,validation_loader, model, target_model, target_label, op
         out, latent_loss = model(img)
         with torch.no_grad():
             target_out = target_model(out)
+            # print(target_out.size())
         try:
             adv_loss = criterion_t(target_out, target_label.long())
         except:
@@ -86,10 +89,10 @@ def train(epoch, loader,validation_loader, model, target_model, target_label, op
         # 重建损失MSELoss()
         recon_loss = criterion(out, img)
         latent_loss = latent_loss.mean()
-        print(adv_loss)
+        print('adv_loss:', adv_loss)
         loss = recon_loss + latent_loss_weight * latent_loss
         + adv_loss_weight * adv_loss
-        print(loss)
+        print('loss', loss)
         loss.backward()
 
         if scheduler is not None:
@@ -159,11 +162,11 @@ if __name__ == '__main__':
     train_dataset = datasets.CIFAR10(
         root=args.path, train=True, download=True, transform=transform)
     validation_data = datasets.CIFAR10(root=args.path, train=False, download=True,
-                                        transform=transform)
+                                       transform=transform)
     loader = DataLoader(train_dataset, batch_size=128,
                         shuffle=True, num_workers=4, pin_memory=True)
     validation_loader = DataLoader(validation_data, batch_size=128,
-                        shuffle=True, num_workers=4, pin_memory=True)
+                                   shuffle=True, num_workers=4, pin_memory=True)
     if args.ckp != '':
         model = VQVAE()
         model.load_state_dict(torch.load(args.ckp))
@@ -186,13 +189,13 @@ if __name__ == '__main__':
             optimizer, args.lr, n_iter=len(loader) * args.epoch, momentum=None
         )
     if args.out == True:
-        train(1, loader,validation_loader, model, target_model, target_label,
+        train(1, loader, validation_loader, model, target_model, target_label,
               optimizer, scheduler, device, args)
 
     torch.cuda.empty_cache()
 
     for i in range(args.epoch):
-        train(i, loader, validation_loader,model, target_model, target_label,
+        train(i, loader, validation_loader, model, target_model, target_label,
               optimizer, scheduler, device, args)
         torch.save(
             model.state_dict(
