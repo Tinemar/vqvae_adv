@@ -3,6 +3,9 @@
 import argparse
 
 import torch
+import torch.nn.functional as F
+import vgg
+
 from torch import nn, optim
 from torch.utils.data import DataLoader
 import torchvision.models as models
@@ -34,34 +37,34 @@ def train(epoch, loader,validation_loader, model, target_model, target_label, op
 
     mse_sum = 0
     mse_n = 0
-
     if args.out == True:
         for i, (img, label) in enumerate(validation_loader):
             model.zero_grad()
             optimizer.zero_grad()
             img = img.to(device)
             label = label.to(device)
-            target_label = target_label.to(device)
-            criterion_t = nn.CrossEntropyLoss().to(device)
             target_model.eval()
             suc = 0
+            _, predicted1 = torch.max(outputs_s.data, 1)
+            _, predicted2 = torch.max(outputs_t.data, 1)
             for i in range(128):
-                i = img[i:i+1]
+                img = img[i:i+1]
+                label = label[i:i+1]
                 # label = label[0]
-                sample = i
+                sample = img
+
                 with torch.no_grad():
                     out, _ = model(sample)
 
-                outputs_t = target_model(Variable(sample))
-                outputs_s = target_model(Variable(out))
+                outputs_t = target_model(sample)
+                outputs_s = target_model(out)
                 _, predicted1 = torch.max(outputs_s.data, 1)
                 _, predicted2 = torch.max(outputs_t.data, 1)
-                if predicted1!=predicted2:
-                    suc +=1
-                # print('sample:', predicted1, 'target_out:', predicted2)
+                print('label:',label,'sample:',predicted1,'attack:',predicted2)
+                if predicted1 != predicted2:
+                    suc += 1
             print(suc/128)
         exit()
-
     for i, (img, label) in enumerate(loader):
         model.zero_grad()
         optimizer.zero_grad()
@@ -77,19 +80,21 @@ def train(epoch, loader,validation_loader, model, target_model, target_label, op
         out, latent_loss = model(img)
         with torch.no_grad():
             target_out = target_model(out)
+            # print(target_out.size())
         try:
             adv_loss = criterion_t(target_out, target_label.long())
         except:
-            target_label = torch.ones(80)
+            target_label = torch.zeros(80)
             target_label = target_label.to(device)
             adv_loss = criterion_t(target_out, target_label.long())
         # 重建损失MSELoss()
         recon_loss = criterion(out, img)
         latent_loss = latent_loss.mean()
-        print(adv_loss)
+        print()
+        print('adv_loss:', adv_loss)
         loss = recon_loss + latent_loss_weight * latent_loss
         + adv_loss_weight * adv_loss
-        print(loss)
+        print('loss', loss)
         loss.backward()
 
         if scheduler is not None:
@@ -110,6 +115,7 @@ def train(epoch, loader,validation_loader, model, target_model, target_label, op
         )
 
         if i % 100 == 0:
+            global best_acc
             model.eval()
 
             sample = img[:sample_size]
@@ -126,7 +132,11 @@ def train(epoch, loader,validation_loader, model, target_model, target_label, op
             )
 
             model.train()
-
+def test(epoch, validation_loader, model, target_model, target_label, optimizer, scheduler, device, args):
+    global best_acc
+    model.eval()
+    acc = 0
+    
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -159,11 +169,11 @@ if __name__ == '__main__':
     train_dataset = datasets.CIFAR10(
         root=args.path, train=True, download=True, transform=transform)
     validation_data = datasets.CIFAR10(root=args.path, train=False, download=True,
-                                        transform=transform)
+                                       transform=transform)
     loader = DataLoader(train_dataset, batch_size=128,
                         shuffle=True, num_workers=4, pin_memory=True)
     validation_loader = DataLoader(validation_data, batch_size=128,
-                        shuffle=True, num_workers=4, pin_memory=True)
+                                   shuffle=True, num_workers=4, pin_memory=True)
     if args.ckp != '':
         model = VQVAE()
         model.load_state_dict(torch.load(args.ckp))
@@ -171,10 +181,16 @@ if __name__ == '__main__':
     else:
         model = VQVAE().to(device)
 
-    target_label = torch.ones(128)
+    target_label = torch.zeros(128)
     print(target_label.size())
     if args.tmodel != '':
-        target_model = torch.load(args.tmodel).to(device)
+        # target_model = torch.load(args.tmodel).to(device)
+        net = vgg.VGG('VGG19')
+        net = net.to(device)
+        net = torch.nn.DataParallel(net)
+        checkpoint = torch.load(args.tmodel)
+        net.load_state_dict(checkpoint['net'])
+        target_model = net
 
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     # optimizer = Lookahead(optimizer, k=5, alpha=0.5)
@@ -186,7 +202,7 @@ if __name__ == '__main__':
             optimizer, args.lr, n_iter=len(loader) * args.epoch, momentum=None
         )
     if args.out == True:
-        train(1, loader,validation_loader, model, target_model, target_label,
+        train(1, loader, validation_loader, model, target_model, target_label,
               optimizer, scheduler, device, args)
 
     torch.cuda.empty_cache()
